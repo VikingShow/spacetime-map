@@ -1,144 +1,61 @@
 <template>
   <div id="app-container">
-    <!-- 左侧时间轴区域 -->
+    <!-- 左侧边栏 -->
     <aside class="sidebar">
       <h1 class="title">时空导图</h1>
       <p class="subtitle">Spacetime Map</p>
+      
+      <!-- 操作按钮 -->
+      <div class="actions">
+        <!-- [REFACTORED] 直接绑定从 useG6 中获取的状态和方法 -->
+        <button @click="toggleEdgeMode" :class="{ active: isAddingEdge }">
+          {{ isAddingEdge ? '取消连线' : '创建连线' }}
+        </button>
+        <p class="actions-tip">
+          提示: 双击节点可编辑文本，右键可操作节点或画布。
+        </p>
+      </div>
+
       <div class="timeline-placeholder">
         <p>时间轴区域</p>
         <p class="tip">(步骤 3 中实现)</p>
       </div>
        <footer class="footer">
-        <p>V 0.1.0</p>
+        <p>V 0.2.1</p>
         <a href="https://github.com/VikingShow/spacetime-map" target="_blank">GitHub Repo</a>
       </footer>
     </aside>
 
     <!-- 右侧 G6 画布区域 -->
     <main class="main-content">
+      <!-- [REFACTORED] g6Container 这个 ref 会被传递给 useG6 -->
       <div id="g6-container" ref="g6Container"></div>
     </main>
   </div>
 </template>
 
 <script setup>
-import { onMounted, onUnmounted, ref, nextTick } from 'vue';
-// 导入 G6 v5 的核心 Graph 类
-import { Graph } from '@antv/g6';
+import { ref, onMounted, nextTick } from 'vue';
+// [REFACTORED] 导入我们新建的组合式函数
+import { useG6 } from './composables/useG6.js';
 
 // G6 画布的 DOM 容器
 const g6Container = ref(null);
-// G6 Graph 实例
-let graph = null;
 
-// 初始示例数据 (G6 v5 格式)
-const mockData = {
-  nodes: [
-    { id: 'node1', style: { labelText: '时空导图' } },
-    { id: 'node2', style: { labelText: '核心概念' } },
-    { id: 'node3', style: { labelText: '技术选型' } },
-    { id: 'node4', style: { labelText: '前端' } },
-    { id: 'node5', style: { labelText: '后端' } },
-    { id: 'node6', style: { labelText: 'Vue.js' } },
-    { id: 'node7', style: { labelText: 'AntV G6' } },
-    { id: 'node8', style: { labelText: 'Node.js' } },
-  ],
-  edges: [
-    { source: 'node1', target: 'node2' },
-    { source: 'node1', target: 'node3' },
-    { source: 'node3', target: 'node4' },
-    { source: 'node3', target: 'node5' },
-    { source: 'node4', target: 'node6' },
-    { source: 'node4', target: 'node7' },
-    { source: 'node5', target: 'node8' },
-  ],
-};
+// [REFACTORED] 调用组合式函数，解构出需要用的状态和方法
+const { isAddingEdge, init, toggleEdgeMode } = useG6(g6Container);
 
-// 初始化 G6 图
-const initGraph = () => {
-  if (!g6Container.value) return;
-
-  const width = g6Container.value.clientWidth;
-  const height = g6Container.value.clientHeight || 600;
-
-  graph = new Graph({
-    container: g6Container.value,
-    width,
-    height,
-    // v5 布局和节点配置语法
-    layout: {
-      type: 'fruchterman',
-      gravity: 5,
-      speed: 5,
-      clustering: true,
-      clusterGravity: 30,
-    },
-    modes: {
-      default: ['drag-canvas', 'zoom-canvas', 'drag-node'],
-    },
-    node: {
-      style: {
-        size: 40,
-        fill: '#5B8FF9',
-        stroke: '#C2D8FF',
-        lineWidth: 2,
-      },
-      label: {
-        style: {
-          fill: '#333',
-          fontSize: 12,
-        },
-      },
-    },
-    edge: {
-      style: {
-        stroke: '#e2e2e2',
-        lineWidth: 1.5,
-      },
-    },
-  });
-
-  // [FIX] 监听 'afterlayout' 事件，在布局完成后再适应视图
-  graph.on('afterlayout', () => {
-    graph.fitView(20);
-    // 这是一个一次性事件，用完后最好关闭，防止后续重排布局时再次触发
-    graph.off('afterlayout');
-  });
-
-  // 使用 G6 v5 稳定版 API `setData` 来加载数据
-  // 这会触发布局计算，并随后触发 'afterlayout' 事件
-  graph.setData(mockData);
-};
-
-// 监听窗口大小变化，自适应调整画布大小
-const handleResize = () => {
-  if (graph && g6Container.value) {
-    const width = g6Container.value.clientWidth;
-    const height = g6Container.value.clientHeight;
-    // 使用 v5 的 setSize API
-    graph.setSize([width, height]);
-    graph.fitView(20);
-  }
-};
-
-// onMounted 生命周期钩子
+// onMounted 生命周期钩子现在非常干净
 onMounted(async () => {
-  // 等待 DOM 更新确保容器有尺寸
+  // 等待 DOM 渲染完成
   await nextTick();
-  initGraph();
-  window.addEventListener('resize', handleResize);
-});
-
-// onUnmounted 生命周期钩子
-onUnmounted(() => {
-  if (graph) {
-    graph.destroy();
-  }
-  window.removeEventListener('resize', handleResize);
+  // 初始化 G6
+  init();
 });
 </script>
 
 <style>
+/* 样式保持不变 */
 #app-container {
   display: flex;
   height: 100vh;
@@ -146,7 +63,6 @@ onUnmounted(() => {
   background-color: #f7f8fa;
 }
 
-/* 左侧边栏 */
 .sidebar {
   width: 280px;
   flex-shrink: 0;
@@ -155,6 +71,7 @@ onUnmounted(() => {
   padding: 24px;
   display: flex;
   flex-direction: column;
+  box-sizing: border-box;
 }
 
 .title {
@@ -168,6 +85,40 @@ onUnmounted(() => {
   font-size: 14px;
   color: #888;
   margin: 4px 0 32px;
+}
+
+.actions {
+  margin-bottom: 24px;
+}
+
+.actions button {
+  width: 100%;
+  padding: 10px;
+  font-size: 14px;
+  font-weight: 500;
+  border-radius: 6px;
+  border: 1px solid #d9d9d9;
+  background-color: #fff;
+  cursor: pointer;
+  transition: all 0.3s;
+}
+
+.actions button:hover {
+  border-color: #40a9ff;
+  color: #40a9ff;
+}
+
+.actions button.active {
+  background-color: #1890ff;
+  color: #fff;
+  border-color: #1890ff;
+}
+
+.actions-tip {
+  font-size: 12px;
+  color: #aaa;
+  margin-top: 12px;
+  line-height: 1.5;
 }
 
 .timeline-placeholder {
@@ -202,12 +153,10 @@ onUnmounted(() => {
   text-decoration: underline;
 }
 
-
-/* 右侧主内容区 */
 .main-content {
   flex-grow: 1;
   display: flex;
-  position: relative; /* 为 G6 画布提供定位上下文 */
+  position: relative;
 }
 
 #g6-container {
