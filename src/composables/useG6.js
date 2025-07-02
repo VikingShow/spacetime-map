@@ -2,6 +2,23 @@ import { ref, onUnmounted } from 'vue';
 import { Graph } from '@antv/g6';
 
 /**
+ * 防抖函数：在事件被频繁触发时，只在最后一次触发后的指定延迟时间后执行函数。
+ * @param {Function} fn 要执行的函数
+ * @param {number} delay 延迟时间（毫秒）
+ * @returns {Function} 防抖处理后的函数
+ */
+function debounce(fn, delay) {
+  let timeoutId = null;
+  return function (...args) {
+    clearTimeout(timeoutId);
+    timeoutId = setTimeout(() => {
+      fn.apply(this, args);
+    }, delay);
+  };
+}
+
+
+/**
  * 这是一个封装了所有 G6 相关逻辑的 Vue 组合式函数
  * @param {import('vue').Ref<HTMLElement | null>} containerRef - G6 画布的 DOM 容器的引用
  */
@@ -9,23 +26,21 @@ export function useG6(containerRef) {
   // --- 内部状态 ---
   const isAddingEdge = ref(false);
   let graph = null;
-  let tempEdge = null;
+  let tempEdge = null; // Now stores the edge model, not the item instance
 
   // --- 核心方法 ---
 
-  // 初始化图表
-  const init = () => {
+  const init = async () => {
     if (!containerRef.value) return;
 
-    const width = containerRef.value.clientWidth;
-    const height = containerRef.value.clientHeight || 600;
+    const canvasWidth = containerRef.value.clientWidth;
+    const canvasHeight = containerRef.value.clientHeight;
 
     graph = new Graph({
       container: containerRef.value,
-      width,
-      height,
-      layout: { type: 'fruchterman', gravity: 10, speed: 5 },
-      behaviors: ['drag-canvas', 'zoom-canvas', 'drag-node'],
+      width: canvasWidth,
+      height: canvasHeight,
+      behaviors: ['drag-canvas', 'zoom-canvas', 'drag-element'],
       node: {
         style: {
           size: 45,
@@ -33,26 +48,59 @@ export function useG6(containerRef) {
           stroke: '#C2D8FF',
           lineWidth: 2,
           cursor: 'pointer',
+          anchorPoints: [ [0.5, 0], [0.5, 1], [0, 0.5], [1, 0.5] ],
         },
         label: { style: { fill: '#fff', fontSize: 12, fontWeight: 'bold' } },
       },
       edge: { style: { stroke: '#aaa', lineWidth: 2, endArrow: true } },
     });
 
-    graph.setData({ nodes: [], edges: [] });
+    const initialData = {
+      nodes: [
+        {
+          id: 'root-node-1',
+          data: { x: canvasWidth / 2 - 100, y: canvasHeight / 2 },
+          style: { labelText: '核心概念', fill: '#f79723', size: 55 },
+        },
+        {
+          id: 'root-node-2',
+          data: { x: canvasWidth / 2 + 100, y: canvasHeight / 2 },
+          style: { labelText: '技术选型' },
+        },
+      ],
+      edges: [
+        { id: 'root-edge', source: 'root-node-1', target: 'root-node-2' }
+      ],
+    };
+    graph.setData(initialData);
+    
+    await graph.render();
+    graph.fitView();
+    
     bindEventListeners();
-    window.addEventListener('resize', handleResize);
+    window.addEventListener('resize', debouncedResize);
+  };
+
+  /**
+   * 手动运行力导向布局的函数
+   */
+  const runLayout = () => {
+    if (graph) {
+      graph.layout({
+        type: 'fruchterman',
+        gravity: 10,
+        speed: 5,
+        preventOverlap: true,
+        onLayoutEnd: () => {
+          graph.fitView();
+        }
+      });
+    }
   };
 
   // 绑定事件监听
   const bindEventListeners = () => {
-    // [DEBUG] 添加日志，追踪事件是否触发
-    console.log('Binding G6 event listeners...');
-
-    // 双击节点：编辑文本
     graph.on('node:dblclick', (evt) => {
-      // [DEBUG]
-      console.log('Event fired: node:dblclick', evt);
       const { item } = evt;
       const model = item.getModel();
       const labelText = model.style?.labelText || '';
@@ -62,10 +110,7 @@ export function useG6(containerRef) {
       }
     });
 
-    // 右键节点：删除节点
     graph.on('node:contextmenu', (evt) => {
-      // [DEBUG]
-      console.log('Event fired: node:contextmenu', evt);
       evt.preventDefault();
       const { item } = evt;
       if (confirm(`确定要删除节点 "${item.getModel().style.labelText}" 吗？`)) {
@@ -73,68 +118,73 @@ export function useG6(containerRef) {
       }
     });
     
-    // 使用 G6 的事件系统来处理画布右键菜单
     graph.on('canvas:contextmenu', (evt) => {
-      // [DEBUG]
-      console.log('Event fired: canvas:contextmenu', evt);
-      evt.preventDefault(); // 阻止浏览器默认右键菜单
-      // G6 事件对象中的 evt.x 和 evt.y 就是我们需要的画布坐标
-      const canvasPoint = { x: evt.x, y: evt.y };
-      const element = graph.getElementByPoint(canvasPoint);
-
-      // 如果鼠标下没有图形项 (即点击在画布空白处)，则执行添加节点逻辑
-      if (!element) {
+      evt.preventDefault(); 
+      if (!evt.item) {
         if (confirm('是否在此处添加一个新节点？')) {
-          graph.addNode({
+          const newNode = {
             id: `node-${Date.now()}`,
             data: {
-              x: canvasPoint.x,
-              y: canvasPoint.y,
+              x: evt.canvas.x,
+              y: evt.canvas.y,
             },
             style: { labelText: '新节点' },
+          };
+          
+          // [FINAL FIX] 采用更稳健的 setData 模式来更新图表
+          const currentData = graph.getData();
+          graph.setData({
+            nodes: [...currentData.nodes, newNode],
+            edges: currentData.edges,
           });
         }
       }
     });
 
-    // “添加连线”模式下的点击事件
     graph.on('node:click', (evt) => {
-      // [DEBUG]
-      console.log('Event fired: node:click', evt);
       if (!isAddingEdge.value) return;
       const { item } = evt;
       const nodeId = item.getID();
 
       if (!tempEdge) {
-        tempEdge = graph.addEdge({
+        const edgeModel = {
           id: 'temp-edge',
           source: nodeId,
           target: nodeId,
           style: { stroke: '#F6BD16', lineDash: [5, 5] },
+        };
+        const currentData = graph.getData();
+        graph.setData({
+            nodes: currentData.nodes,
+            edges: [...currentData.edges, edgeModel],
         });
+        tempEdge = edgeModel;
       } else {
-        if (tempEdge.getSource().getID() === nodeId) {
-          graph.removeItem(tempEdge);
+        if (tempEdge.source === nodeId) {
+          graph.removeData('edge', tempEdge.id); // removeData is still fine for single items
           tempEdge = null;
           return;
         }
-        graph.updateItem(tempEdge, {
-          target: nodeId,
+        graph.removeData('edge', tempEdge.id);
+        const newEdge = {
           id: `edge-${Date.now()}`,
-          style: { stroke: '#aaa', lineDash: [] },
+          source: tempEdge.source,
+          target: nodeId,
+        };
+        const currentData = graph.getData();
+        graph.setData({
+            nodes: currentData.nodes,
+            edges: [...currentData.edges, newEdge],
         });
         tempEdge = null;
         toggleEdgeMode();
       }
     });
 
-    // “添加连线”模式下，鼠标移动更新临时边的位置
     graph.on('mousemove', (evt) => {
-      // 为了避免日志刷屏，mousemove 事件暂时不添加日志
       if (isAddingEdge.value && tempEdge) {
-        // 直接使用 G6 事件对象提供的画布坐标
-        const canvasPoint = { x: evt.x, y: evt.y };
-        graph.updateItem(tempEdge, { target: canvasPoint });
+        const canvasPoint = { x: evt.canvas.x, y: evt.canvas.y };
+        graph.updateItem(tempEdge.id, { target: canvasPoint });
       }
     });
   };
@@ -143,23 +193,26 @@ export function useG6(containerRef) {
   const toggleEdgeMode = () => {
     isAddingEdge.value = !isAddingEdge.value;
     if (!isAddingEdge.value && tempEdge) {
-      graph.removeItem(tempEdge);
+      graph.removeData('edge', tempEdge.id);
       tempEdge = null;
     }
   };
 
-  // 窗口大小调整
-  const handleResize = () => {
-    if (graph && containerRef.value) {
+  // 这是实际的、被简化的 resize 逻辑
+  const resizeGraph = () => {
+    if (graph && !graph.destroyed && containerRef.value) {
       const width = containerRef.value.clientWidth;
       const height = containerRef.value.clientHeight;
       graph.setSize([width, height]);
     }
   };
+
+  // 创建一个防抖处理过的 resize 函数
+  const debouncedResize = debounce(resizeGraph, 300);
   
   // 组件卸载时销毁图表
   onUnmounted(() => {
-    window.removeEventListener('resize', handleResize);
+    window.removeEventListener('resize', debouncedResize);
     if (graph) {
       graph.destroy();
     }
@@ -170,5 +223,6 @@ export function useG6(containerRef) {
     isAddingEdge,
     init,
     toggleEdgeMode,
+    runLayout,
   };
 }

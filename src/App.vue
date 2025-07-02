@@ -7,9 +7,12 @@
       
       <!-- 操作按钮 -->
       <div class="actions">
-        <!-- [REFACTORED] 直接绑定从 useG6 中获取的状态和方法 -->
         <button @click="toggleEdgeMode" :class="{ active: isAddingEdge }">
           {{ isAddingEdge ? '取消连线' : '创建连线' }}
+        </button>
+        <!-- [NEW] 添加整理布局按钮 -->
+        <button @click="runLayout" class="layout-btn">
+          整理布局
         </button>
         <p class="actions-tip">
           提示: 双击节点可编辑文本，右键可操作节点或画布。
@@ -21,14 +24,13 @@
         <p class="tip">(步骤 3 中实现)</p>
       </div>
        <footer class="footer">
-        <p>V 0.2.1</p>
+        <p>V 0.3.0</p>
         <a href="https://github.com/VikingShow/spacetime-map" target="_blank">GitHub Repo</a>
       </footer>
     </aside>
 
     <!-- 右侧 G6 画布区域 -->
     <main class="main-content">
-      <!-- [REFACTORED] g6Container 这个 ref 会被传递给 useG6 -->
       <div id="g6-container" ref="g6Container"></div>
     </main>
   </div>
@@ -36,20 +38,15 @@
 
 <script setup>
 import { ref, onMounted, nextTick } from 'vue';
-// [REFACTORED] 导入我们新建的组合式函数
 import { useG6 } from './composables/useG6.js';
 
-// G6 画布的 DOM 容器
 const g6Container = ref(null);
 
-// [REFACTORED] 调用组合式函数，解构出需要用的状态和方法
-const { isAddingEdge, init, toggleEdgeMode } = useG6(g6Container);
+// [NEW] 从 useG6 中解构出 runLayout 方法
+const { isAddingEdge, init, toggleEdgeMode, runLayout } = useG6(g6Container);
 
-// onMounted 生命周期钩子现在非常干净
 onMounted(async () => {
-  // 等待 DOM 渲染完成
   await nextTick();
-  // 初始化 G6
   init();
 });
 </script>
@@ -112,6 +109,17 @@ onMounted(async () => {
   background-color: #1890ff;
   color: #fff;
   border-color: #1890ff;
+}
+
+/* [NEW] 为整理布局按钮添加样式 */
+.layout-btn {
+  margin-top: 10px;
+  background-color: #f0f8ff;
+  border-color: #b3e0ff;
+  color: #1890ff;
+}
+.layout-btn:hover {
+  background-color: #e6f7ff;
 }
 
 .actions-tip {
